@@ -1196,6 +1196,7 @@ dependencies = [
  "log",
  "num-traits",
  "odbc-api",
+ "once_cell",
  "parquet",
  "predicates",
  "stderrlog",

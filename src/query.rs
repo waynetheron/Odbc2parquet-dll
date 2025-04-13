@@ -15,6 +15,8 @@ mod timestamp;
 mod timestamp_precision;
 mod timestamp_tz;
 
+use crate::connection::{open_connection,ConnectOpts};
+use parquet::basic::{Compression,ZstdLevel};
 use anyhow::Error;
 use fetch_batch::{fetch_strategy, FetchBatch};
 use io_arg::IoArg;
@@ -29,10 +31,47 @@ use self::{
     parquet_writer::{parquet_output, ParquetWriterOptions},
 };
 
-use crate::{connection::open_connection, QueryOpt};
+use std::path::PathBuf;
+use bytesize::ByteSize;
+use crate::enum_args::{CompressionVariants,EncodingArgument};
+
+
+use parquet::basic::Encoding;
+#[derive(Debug)]
+pub struct QueryOpt {
+    pub connect_opts: ConnectOpts,
+    pub query: String,
+    pub output: IoArg,
+    pub column_compression_default: CompressionVariants,
+    pub encoding: EncodingArgument,
+    pub batch_size_row: Option<usize>,
+    pub batch_size_memory: Option<ByteSize>,
+    pub row_groups_per_file: u32,
+    pub sequential_fetching: bool,
+    pub file_size_threshold: Option<ByteSize>,
+    pub column_length_limit: usize,
+    pub parquet_column_encoding: Vec<(String, Encoding)>,
+    pub driver_does_not_support_64bit_integers: bool,
+    pub avoid_decimal: bool,
+    pub suffix_length: usize,
+    pub no_empty_file: bool,
+    pub parameters: Vec<String>,
+}
+
+
+
+fn query_statement_text(query: String) -> Result<String, Error> {
+    Ok(if query == "-" {
+        let mut buf = String::new();
+        stdin().lock().read_to_string(&mut buf)?;
+        buf
+    } else {
+        query
+    })
+}
 
 /// Execute a query and writes the result to parquet.
-pub fn query(opt: QueryOpt) -> Result<(), Error> {
+pub fn query(opt: QueryOpt) -> Result<usize, Error> {
     let QueryOpt {
         connect_opts,
         output,
@@ -44,24 +83,19 @@ pub fn query(opt: QueryOpt) -> Result<(), Error> {
         sequential_fetching,
         file_size_threshold,
         encoding,
-        prefer_varbinary,
-        column_compression_default,
-        column_compression_level_default,
         parquet_column_encoding,
         avoid_decimal,
         driver_does_not_support_64bit_integers,
         suffix_length,
         no_empty_file,
         column_length_limit,
+        column_compression_default,
     } = opt;
 
     let batch_size = BatchSizeLimit::new(batch_size_row, batch_size_memory);
     let file_size = FileSizeLimit::new(row_groups_per_file, file_size_threshold);
     let query = query_statement_text(query)?;
-
-    // Convert the input strings into parameters suitable for use with ODBC.
-    let params: Vec<_> = parameters
-        .iter()
+    let params: Vec<_> = parameters.iter()
         .map(|param| param.as_str().into_parameter())
         .collect();
 
@@ -70,33 +104,25 @@ pub fn query(opt: QueryOpt) -> Result<(), Error> {
     info!("Database Management System Name: {db_name}");
 
     let parquet_format_options = ParquetWriterOptions {
-        column_compression_default: column_compression_default
-            .to_compression(column_compression_level_default)?,
+        column_compression_default: Compression::ZSTD(ZstdLevel::try_new(3).unwrap()),
         column_encodings: parquet_column_encoding,
         file_size,
         suffix_length,
         no_empty_file,
     };
-
     let mapping_options = MappingOptions {
+        prefer_varbinary: false,
         db_name: &db_name,
         use_utf16: encoding.use_utf16(),
-        prefer_varbinary,
         avoid_decimal,
         driver_does_support_i64: !driver_does_not_support_64bit_integers,
         column_length_limit,
     };
 
-    if let Some(cursor) = odbc_conn
-        .into_cursor(&query, params.as_slice(), None)
-        // Drop the connection for odbc_api::ConnectionAndError in order to make the error
-        // convertible into an anyhow error. The connection is offered by odbc_api in the error type
-        // to allow reusing the same connection, even after conversion into cursor failed. However
-        // within the context of `odbc2parquet`, we just want to shutdown the application and
-        // present an error to the user.
+    if let Some(cursor) = odbc_conn.into_cursor(&query, params.as_slice(), None)
         .map_err(odbc_api::Error::from)?
     {
-        cursor_to_parquet(
+        let row_count = cursor_to_parquet(
             cursor,
             output,
             batch_size,
@@ -104,26 +130,16 @@ pub fn query(opt: QueryOpt) -> Result<(), Error> {
             mapping_options,
             parquet_format_options,
         )?;
+        Ok(row_count)
     } else {
         eprintln!(
             "Query came back empty (not even a schema has been returned). No file has been created"
         );
+        Ok(0)
     }
-    Ok(())
 }
 
-/// The query statement is either passed verbatim at the command line, or via stdin. The latter is
-/// indicated by passing `-` at the command line instead of the string. This method reads stdin
-/// until EOF if required and always returns the statement text.
-fn query_statement_text(query: String) -> Result<String, Error> {
-    Ok(if query == "-" {
-        let mut buf = String::new();
-        stdin().lock().read_to_string(&mut buf)?;
-        buf
-    } else {
-        query
-    })
-}
+
 
 fn cursor_to_parquet(
     mut cursor: impl Cursor + Send + 'static,
@@ -132,12 +148,14 @@ fn cursor_to_parquet(
     concurrent_fetching: bool,
     mapping_options: MappingOptions,
     parquet_format_options: ParquetWriterOptions,
-) -> Result<(), Error> {
+) -> Result<usize, Error> {
     let table_strategy = ConversionStrategy::new(&mut cursor, mapping_options)?;
     let parquet_schema = table_strategy.parquet_schema();
     let writer = parquet_output(path, parquet_schema.clone(), parquet_format_options)?;
     let fetch_strategy: Box<dyn FetchBatch> =
         fetch_strategy(concurrent_fetching, cursor, &table_strategy, batch_size)?;
-    table_strategy.block_cursor_to_parquet(fetch_strategy, writer)?;
-    Ok(())
+    let row_count = table_strategy.block_cursor_to_parquet(fetch_strategy, writer)?;
+    println!("{}", row_count);
+    eprintln!("Returning {} rows", row_count);
+    Ok(row_count)
 }

@@ -109,14 +109,14 @@ impl ConversionStrategy {
         &self,
         mut fetch_strategy: Box<dyn FetchBatch>,
         mut writer: Box<dyn ParquetOutput>,
-    ) -> Result<(), Error> {
+    ) -> Result<usize, Error> {
         let mut num_batch = 0;
         // Count the number of total rows fetched so far for logging. This should be identical to
         // `num_batch * batch_size_row + num_rows`.
         let mut total_rows_fetched = 0;
-
+    
         let mut pb = ParquetBuffer::new(fetch_strategy.max_batch_size_in_rows());
-
+    
         while let Some(buffer) = fetch_strategy
             .next_batch()
             .map_err(|e| self.translate_fetch_error(e))?
@@ -126,10 +126,13 @@ impl ConversionStrategy {
             total_rows_fetched += num_rows;
             info!("Fetched batch {num_batch} with {num_rows} rows.");
             info!("Fetched {total_rows_fetched} rows in total.");
+            eprintln!("Fetched batch {} with {} rows.", num_batch, num_rows);
             self.write_batch(&mut writer, num_batch, buffer, &mut pb)?;
         }
+    
         writer.close_box()?;
-        Ok(())
+        println!("{total_rows_fetched}");
+        Ok(total_rows_fetched)
     }
 
     fn write_batch(
