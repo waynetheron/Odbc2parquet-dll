@@ -6,6 +6,8 @@
 
 A DLL version of the command line tool that can be used by .Net, Java etc. The function returns the row number exported which is useful to determine if the file is empty. 
 
+![.Net Example](images/netExample.png)
+
 * Small memory footprint. Only holds one batch at a time in memory.
 * Fast. Makes efficient use of ODBC bulk reads, to lower IO overhead.
 * Flexible. Query any ODBC data source you have a driver for. MySQL, MS SQL, Excel, ...
