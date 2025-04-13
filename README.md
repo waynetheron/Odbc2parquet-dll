@@ -57,4 +57,3 @@ To work with this tool you need an ODBC driver manager and an ODBC driver for th
 
 <https://github.com/waynetheron/Odbc2parquet-dll/releases/latest>
 
-*Note*: Download the 32 Bit version if you want to connect to data sources using 32 Bit drivers and download the 64 Bit version if you want to connect via 64 Bit drivers. It won't work vice versa.
