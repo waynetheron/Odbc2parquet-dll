@@ -1,4 +1,4 @@
-# ODBC to Parquet
+# ODBC to Parquet Dll
 
 [![Licence](https://img.shields.io/crates/l/odbc2parquet)](https://github.com/pacman82/odbc2parquet/blob/master/License)
 [![Crates.io](https://img.shields.io/crates/v/odbc2parquet)](https://crates.io/crates/odbc2parquet)
