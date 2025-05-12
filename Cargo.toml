@@ -33,7 +33,7 @@ num-traits = "0.2.19"
 clap_complete = "4.5.48"
 bytesize = "2.0.1"
 io-arg = "0.2.1"
-tempfile = "3.19.1"
+tempfile = "3.20.0"
 once_cell = "1.18"
 
 # Using ODBC version 3.5 is avoiding warnings with drivers which only support 3.5 as oppossed to
